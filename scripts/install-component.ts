@@ -7,7 +7,7 @@ async function installComponent(componentName: string) {
   try {
     console.log("🔍 Verificando ambiente...");
     const currentDir = Deno.cwd();
-    
+
     // Define os caminhos
     const componentsDir = join(currentDir, "src", "components");
     const componentDir = join(componentsDir, componentName);
@@ -21,38 +21,48 @@ async function installComponent(componentName: string) {
     tempDir = await Deno.makeTempDir();
 
     console.log("🔍 Clonando repositório...");
-    const cloneProcess = new Deno.Command("git", {
-      args: [
+    const cloneProcess = Deno.run({
+      cmd: [
+        "git",
         "clone",
         "--depth", "1",
         "--filter=blob:none",
         "--sparse",
         "git@github.com:deco-sites/components.git",
-        tempDir
+        tempDir,
       ],
+      stdout: "piped",
+      stderr: "piped",
     });
 
+    const cloneStatus = await cloneProcess.status();
     const cloneOutput = await cloneProcess.output();
-    if (!cloneOutput.success) {
+    cloneProcess.close();
+    if (!cloneStatus.success) {
       const decoder = new TextDecoder();
-      throw new Error(`Falha ao clonar repositório:\n${decoder.decode(cloneOutput.stderr)}`);
+      throw new Error(`Falha ao clonar repositório:\n${decoder.decode(cloneOutput)}`);
     }
 
     console.log("🔍 Localizando componente...");
-    const sparseProcess = new Deno.Command("git", {
-      args: [
+    const sparseProcess = Deno.run({
+      cmd: [
+        "git",
         "-C",
         tempDir,
         "sparse-checkout",
         "set",
-        `components/${componentName}`
+        `components/${componentName}`,
       ],
+      stdout: "piped",
+      stderr: "piped",
     });
 
+    const sparseStatus = await sparseProcess.status();
     const sparseOutput = await sparseProcess.output();
-    if (!sparseOutput.success) {
+    sparseProcess.close();
+    if (!sparseStatus.success) {
       const decoder = new TextDecoder();
-      throw new Error(`Componente não encontrado:\n${decoder.decode(sparseOutput.stderr)}`);
+      throw new Error(`Componente não encontrado:\n${decoder.decode(sparseOutput)}`);
     }
 
     // Verifica se o componente existe no repositório
@@ -97,9 +107,9 @@ if (import.meta.main) {
   if (!componentName) {
     console.error("\n❌ Erro: Nome do componente é obrigatório");
     console.error("\n📘 Uso:");
-    console.error("deno run --allow-run --allow-read --allow-write scripts/install-component.ts <nome-do-componente>");
+    console.error("deno run --allow-run --allow-read --allow-write --allow-net scripts/install-component.ts <nome-do-componente>");
     console.error("\n📝 Exemplo:");
-    console.error("deno run --allow-run --allow-read --allow-write scripts/install-component.ts MultiSliderRange");
+    console.error("deno run --allow-run --allow-read --allow-write --allow-net scripts/install-component.ts MultiSliderRange");
     Deno.exit(1);
   }
 
