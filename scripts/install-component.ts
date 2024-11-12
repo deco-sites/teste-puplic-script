@@ -23,9 +23,14 @@ async function installComponent(componentPrefix: string) {
       stdout: "piped",
       stderr: "piped",
     });
-
+    const cloneOutput = await cloneProcess.output();
+    const cloneError = await cloneProcess.stderrOutput();
     const cloneStatus = await cloneProcess.status();
     cloneProcess.close();
+    
+    console.log(new TextDecoder().decode(cloneOutput));
+    console.error(new TextDecoder().decode(cloneError));
+
     if (!cloneStatus.success) throw new Error("Falha ao clonar repositório.");
 
     console.log("🔍 Buscando componentes correspondentes...");
@@ -34,9 +39,14 @@ async function installComponent(componentPrefix: string) {
       stdout: "piped",
       stderr: "piped",
     });
-
+    const sparseSetOutput = await sparseSetProcess.output();
+    const sparseSetError = await sparseSetProcess.stderrOutput();
     const sparseSetStatus = await sparseSetProcess.status();
     sparseSetProcess.close();
+
+    console.log(new TextDecoder().decode(sparseSetOutput));
+    console.error(new TextDecoder().decode(sparseSetError));
+
     if (!sparseSetStatus.success) {
       throw new Error(`Componente '${componentPrefix}' não encontrado ou falha ao configurar sparse-checkout.`);
     }
