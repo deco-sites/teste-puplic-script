@@ -15,7 +15,7 @@ async function installComponent(componentPrefix: string) {
     console.log("📦 Preparando para baixar o componente...");
     tempDir = await Deno.makeTempDir();
 
-    const repoUrl = "git@github.com:deco-sites/components.git";
+    const repoUrl = "https://github.com/deco-sites/components.git";
 
     console.log("🔍 Clonando repositório...");
     const cloneProcess = Deno.run({
@@ -29,62 +29,33 @@ async function installComponent(componentPrefix: string) {
     if (!cloneStatus.success) throw new Error("Falha ao clonar repositório.");
 
     console.log("🔍 Buscando componentes correspondentes...");
-    const sparseListProcess = Deno.run({
-      cmd: ["git", "-C", tempDir, "sparse-checkout", "list"],
-      stdout: "piped",
-    });
-    
-    const sparseListOutput = new TextDecoder().decode(await sparseListProcess.output());
-    sparseListProcess.close();
-    
-    const componentPaths = sparseListOutput
-      .split("\n")
-      .filter(path => path.includes(`components/${componentPrefix}`) && path.endsWith(".tsx"));
-    
-    if (componentPaths.length === 0) {
-      throw new Error(`Nenhum componente encontrado com o prefixo '${componentPrefix}'`);
-    }
-
-    const componentOptions = componentPaths.map(path => path.replace("components/", "").replace(".tsx", ""));
-    let selectedComponent: string;
-
-    if (componentOptions.length > 1) {
-      console.log("Múltiplas correspondências encontradas:");
-      componentOptions.forEach((name, index) => console.log(`${index + 1}. ${name}`));
-
-      const input = prompt("Escolha o número do componente desejado:");
-      const index = parseInt(input || "") - 1;
-
-      if (isNaN(index) || index < 0 || index >= componentOptions.length) {
-        throw new Error("Escolha inválida");
-      }
-      selectedComponent = componentOptions[index];
-    } else {
-      selectedComponent = componentOptions[0];
-    }
-
-    console.log(`🔍 Selecionado: ${selectedComponent}`);
     const sparseSetProcess = Deno.run({
-      cmd: ["git", "-C", tempDir, "sparse-checkout", "set", `components/${selectedComponent}`],
+      cmd: ["git", "-C", tempDir, "sparse-checkout", "set", `components/${componentPrefix}`],
       stdout: "piped",
       stderr: "piped",
     });
-    
+
     const sparseSetStatus = await sparseSetProcess.status();
     sparseSetProcess.close();
-    if (!sparseSetStatus.success) throw new Error("Falha ao configurar sparse-checkout.");
+    if (!sparseSetStatus.success) {
+      throw new Error(`Componente '${componentPrefix}' não encontrado ou falha ao configurar sparse-checkout.`);
+    }
 
-    const sourceDir = join(tempDir, "components", selectedComponent);
-    await Deno.stat(sourceDir);
+    const sourceDir = join(tempDir, "components", componentPrefix);
+    try {
+      await Deno.stat(sourceDir);
+    } catch {
+      throw new Error(`Componente '${componentPrefix}' não encontrado no repositório.`);
+    }
 
     console.log("📋 Copiando arquivos...");
     for await (const entry of walk(sourceDir, { exts: [".tsx"], includeFiles: true })) {
-      const destinationPath = join(componentsDir, selectedComponent, entry.path.replace(sourceDir, ""));
+      const destinationPath = join(componentsDir, componentPrefix, entry.path.replace(sourceDir, ""));
       await ensureDir(join(destinationPath, ".."));
       await copy(entry.path, destinationPath, { overwrite: true });
     }
 
-    console.log(`✅ Componente '${selectedComponent}' instalado com sucesso em:\n${join(componentsDir, selectedComponent)}`);
+    console.log(`✅ Componente '${componentPrefix}' instalado com sucesso em:\n${join(componentsDir, componentPrefix)}`);
 
   } catch (error) {
     console.error("\n❌ Erro durante a instalação:");
@@ -108,7 +79,7 @@ if (import.meta.main) {
   if (!componentPrefix) {
     console.error("\n❌ Erro: Prefixo do componente é obrigatório");
     console.error("\n📘 Uso:");
-    console.error("deno run --allow-run --allow-read --allow-write --allow-net scripts/install-component.ts <prefixo-do-componente>");
+    console.error("deno run --allow-run --allow-read --allow-write --allow-net https://raw.githubusercontent.com/deco-sites/teste-puplic-script/main/scripts/install-component.ts <prefixo-do-componente>");
     Deno.exit(1);
   }
 
