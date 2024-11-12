@@ -1,5 +1,30 @@
-import { ensureDir, copy } from "https://deno.land/std/fs/mod.ts";
+import { ensureDir, copy, exists } from "https://deno.land/std/fs/mod.ts";
 import { join } from "https://deno.land/std/path/mod.ts";
+
+async function downloadInstallScript(repoUrl: string): Promise<void> {
+  const tempDir = await Deno.makeTempDir();
+  
+  try {
+    console.log("📥 Baixando script de instalação...");
+    const cloneProcess = new Deno.Command("git", {
+      args: ["clone", "--depth", "1", repoUrl, tempDir],
+    });
+
+    const cloneOutput = await cloneProcess.output();
+    if (!cloneOutput.success) {
+      const decoder = new TextDecoder();
+      throw new Error(`Falha ao clonar o repositório:\n${decoder.decode(cloneOutput.stderr)}`);
+    }
+
+    const sourceFile = join(tempDir, "install-component.ts");
+    const targetFile = "install-component.ts";
+
+    await copy(sourceFile, targetFile, { overwrite: true });
+    console.log("✅ Script de instalação baixado com sucesso!");
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+}
 
 // Função para listar os arquivos .tsx do repositório remoto
 async function listComponentsRemote(repoUrl: string): Promise<string[]> {
@@ -161,6 +186,28 @@ if (import.meta.main) {
     Deno.exit(1);
   }
 
-  const repoUrl = "https://github.com/deco-sites/components.git"; // URL do repositório público
-  await installComponent(componentName, repoUrl);
+  const scriptExists = await exists("install-component.ts");
+  const repoUrl = "https://github.com/deco-sites/components.git";
+
+  if (!scriptExists) {
+    await downloadInstallScript(repoUrl);
+    
+    // Reexecutar o script após o download
+    const process = new Deno.Command("deno", {
+      args: [
+        "run",
+        "--allow-run",
+        "--allow-read",
+        "--allow-write",
+        "--allow-net",
+        "install-component.ts",
+        componentName
+      ],
+    });
+    
+    const output = await process.output();
+    Deno.exit(output.code);
+  } else {
+    await installComponent(componentName, repoUrl);
+  }
 }
