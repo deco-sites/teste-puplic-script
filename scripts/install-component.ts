@@ -1,83 +1,141 @@
-import { ensureDir, copy, walk } from "https://deno.land/std/fs/mod.ts";
+import { ensureDir, copy } from "https://deno.land/std/fs/mod.ts";
 import { join } from "https://deno.land/std/path/mod.ts";
 
-async function installComponent(componentPrefix: string) {
+// Função para listar os arquivos .tsx do repositório remoto
+async function listComponentsRemote(repoUrl: string): Promise<string[]> {
+  const tempDir = await Deno.makeTempDir();
+
+  console.log("🔍 Clonando repositório remoto...");
+  const cloneProcess = new Deno.Command("git", {
+    args: ["clone", "--depth", "1", "--filter=blob:none", "--sparse", repoUrl, tempDir],
+  });
+
+  const cloneOutput = await cloneProcess.output();
+  if (!cloneOutput.success) {
+    const decoder = new TextDecoder();
+    throw new Error(`Falha ao clonar o repositório remoto:\n${decoder.decode(cloneOutput.stderr)}`);
+  }
+
+  console.log("🔍 Buscando componentes correspondentes...");
+  const listProcess = new Deno.Command("git", {
+    args: ["ls-tree", "--full-tree", "-r", "HEAD", "components"],
+    cwd: tempDir,
+  });
+
+  const listOutput = await listProcess.output();
+  if (!listOutput.success) {
+    const decoder = new TextDecoder();
+    throw new Error(`Falha ao listar os componentes:\n${decoder.decode(listOutput.stderr)}`);
+  }
+
+  const decoder = new TextDecoder();
+  const output = decoder.decode(listOutput.stdout);
+
+  const components = output
+    .split("\n")
+    .filter(line => line.endsWith(".tsx"))
+    .map(line => line.split("\t")[1]);
+
+  await Deno.remove(tempDir, { recursive: true });
+
+  return components;
+}
+
+async function installComponent(componentName: string, repoUrl: string) {
   let tempDir: string | undefined;
 
   try {
     console.log("🔍 Verificando ambiente...");
     const currentDir = Deno.cwd();
     const componentsDir = join(currentDir, "src", "components");
+    const componentDir = join(componentsDir, componentName);
 
     console.log("📁 Verificando estrutura de pastas...");
-    await ensureDir(componentsDir);
+    await ensureDir(componentDir);
 
     console.log("📦 Preparando para baixar o componente...");
     tempDir = await Deno.makeTempDir();
 
-    const repoUrl = "https://github.com/deco-sites/components.git";
-
-    console.log("🔍 Clonando repositório...");
-    const cloneProcess = Deno.run({
-      cmd: ["git", "clone", "--depth", "1", "--filter=blob:none", "--sparse", repoUrl, tempDir],
-      stdout: "piped",
-      stderr: "piped",
+    console.log("🔍 Clonando repositório remoto...");
+    const cloneProcess = new Deno.Command("git", {
+      args: [
+        "clone",
+        "--depth", "1",
+        "--filter=blob:none",
+        "--sparse",
+        repoUrl,
+        tempDir,
+      ],
     });
 
     const cloneOutput = await cloneProcess.output();
-    const cloneError = await cloneProcess.stderrOutput();
-    const cloneStatus = await cloneProcess.status();
-    cloneProcess.close();
-    
-    // Mostrar as saídas de erro se houver
-    if (!cloneStatus.success) {
-      console.error("Erro ao clonar repositório:");
-      console.error(new TextDecoder().decode(cloneError));
-      throw new Error("Falha ao clonar repositório.");
+    if (!cloneOutput.success) {
+      const decoder = new TextDecoder();
+      throw new Error(`Falha ao clonar repositório:\n${decoder.decode(cloneOutput.stderr)}`);
     }
-
-    console.log(new TextDecoder().decode(cloneOutput));
 
     console.log("🔍 Buscando componentes correspondentes...");
-    const sparseSetProcess = Deno.run({
-      cmd: ["git", "-C", tempDir, "sparse-checkout", "set", `components/${componentPrefix}`],
-      stdout: "piped",
-      stderr: "piped",
+    const components = await listComponentsRemote(repoUrl);
+    if (components.length === 0) {
+      throw new Error("Nenhum componente encontrado no repositório.");
+    }
+
+    if (components.length === 1) {
+      console.log(`Apenas um componente encontrado: ${components[0]}`);
+    } else {
+      console.log("Escolha um componente para instalar:");
+      components.forEach((component, index) => {
+        console.log(`${index + 1}: ${component}`);
+      });
+
+      const selectedIndex = parseInt(Deno.args[0] ?? "", 10) - 1;
+      if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= components.length) {
+        throw new Error("Seleção inválida. Por favor, escolha um número de 1 a " + components.length);
+      }
+
+      console.log(`Você escolheu o componente: ${components[selectedIndex]}`);
+    }
+
+    const selectedComponent = components.length === 1 ? components[0] : components[parseInt(Deno.args[0] ?? "", 10) - 1];
+    const componentDirPath = selectedComponent.replace(".tsx", "");
+
+    console.log("🔍 Localizando componente...");
+
+    // Correção do sparse-checkout para incluir o diretório components
+    const sparseProcess = new Deno.Command("git", {
+      args: ["-C", tempDir, "sparse-checkout", "set", "components"],
     });
 
-    const sparseSetOutput = await sparseSetProcess.output();
-    const sparseSetError = await sparseSetProcess.stderrOutput();
-    const sparseSetStatus = await sparseSetProcess.status();
-    sparseSetProcess.close();
-
-    // Mostrar as saídas de erro se houver
-    if (!sparseSetStatus.success) {
-      console.error("Erro ao configurar sparse-checkout:");
-      console.error(new TextDecoder().decode(sparseSetError));
-      throw new Error(`Componente '${componentPrefix}' não encontrado ou falha ao configurar sparse-checkout.`);
+    const sparseOutput = await sparseProcess.output();
+    if (!sparseOutput.success) {
+      const decoder = new TextDecoder();
+      throw new Error(`Erro ao configurar sparse-checkout:\n${decoder.decode(sparseOutput.stderr)}`);
     }
 
-    console.log(new TextDecoder().decode(sparseSetOutput));
+    // Atualizar o repositório após configurar sparse-checkout
+    const pullProcess = new Deno.Command("git", {
+      args: ["-C", tempDir, "pull", "origin", "main"],
+    });
+    await pullProcess.output();
 
-    const sourceDir = join(tempDir, "components", componentPrefix);
-    try {
-      await Deno.stat(sourceDir);
-    } catch {
-      throw new Error(`Componente '${componentPrefix}' não encontrado no repositório.`);
-    }
+    // Corrigir o caminho do arquivo fonte
+    const sourceFile = join(tempDir, selectedComponent);
+    const targetFile = join(componentDir, componentName);
 
     console.log("📋 Copiando arquivos...");
-    for await (const entry of walk(sourceDir, { exts: [".tsx"], includeFiles: true })) {
-      const destinationPath = join(componentsDir, componentPrefix, entry.path.replace(sourceDir, ""));
-      await ensureDir(join(destinationPath, ".."));
-      await copy(entry.path, destinationPath, { overwrite: true });
-    }
+    await copy(sourceFile, targetFile, { overwrite: true });
 
-    console.log(`✅ Componente '${componentPrefix}' instalado com sucesso em:\n${join(componentsDir, componentPrefix)}`);
+    console.log(`✅ Componente instalado com sucesso em:\n${componentDir}`);
 
   } catch (error) {
     console.error("\n❌ Erro durante a instalação:");
+    console.error("----------------------------");
     console.error(error.message);
+    console.error("----------------------------");
+    console.error("\n💡 Dicas:");
+    console.error("1. Verifique se está no diretório correto do projeto");
+    console.error("2. Certifique-se de que tem permissões para criar pastas e arquivos");
+    console.error("3. Verifique se tem acesso ao repositório");
     Deno.exit(1);
   } finally {
     if (tempDir) {
@@ -92,15 +150,17 @@ async function installComponent(componentPrefix: string) {
 }
 
 if (import.meta.main) {
-  const componentPrefix = Deno.args[0];
+  const componentName = Deno.args[0];
 
-  if (!componentPrefix) {
-    console.error("\n❌ Erro: Prefixo do componente é obrigatório");
+  if (!componentName) {
+    console.error("\n❌ Erro: Nome do componente é obrigatório");
     console.error("\n📘 Uso:");
-    console.error("deno run --allow-run --allow-read --allow-write --allow-net https://raw.githubusercontent.com/deco-sites/teste-puplic-script/main/scripts/install-component.ts <prefixo-do-componente>");
+    console.error("deno run --allow-run --allow-read --allow-write --allow-net scripts/install-component.ts <nome-do-componente>");
+    console.error("\n📝 Exemplo:");
+    console.error("deno run --allow-run --allow-read --allow-write --allow-net scripts/install-component.ts MultiSliderRange");
     Deno.exit(1);
   }
 
-  await installComponent(componentPrefix);
+  const repoUrl = "https://github.com/deco-sites/components.git"; // URL do repositório público
+  await installComponent(componentName, repoUrl);
 }
-    console.error("teste");
