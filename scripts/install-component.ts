@@ -6,6 +6,8 @@ async function downloadAndCopyComponent(componentName: string) {
     const tempDir = await Deno.makeTempDir();
     const targetPath = `${currentDir}/src/components/${componentName}`;
 
+    console.log("📦 Baixando componente...");
+
     // Clona apenas a pasta específica do componente
     const cloneProcess = new Deno.Command("git", {
       args: [
@@ -13,12 +15,17 @@ async function downloadAndCopyComponent(componentName: string) {
         "--depth", "1",
         "--filter=blob:none",
         "--sparse",
-        "git@github.com:deco-sites/components.git",
+        "git@github.com:deco-sites/components.git",  // Repositório privado
         tempDir
       ],
     });
 
-    await cloneProcess.output();
+    const cloneOutput = await cloneProcess.output();
+    if (!cloneOutput.success) {
+      throw new Error("Falha ao clonar repositório");
+    }
+
+    console.log("🔍 Localizando componente...");
 
     // Configura sparse-checkout para pegar apenas a pasta do componente
     const sparseProcess = new Deno.Command("git", {
@@ -31,16 +38,37 @@ async function downloadAndCopyComponent(componentName: string) {
       ],
     });
 
-    await sparseProcess.output();
+    const sparseOutput = await sparseProcess.output();
+    if (!sparseOutput.success) {
+      throw new Error("Componente não encontrado");
+    }
 
-    // Cria diretório de destino
-    await ensureDir(`${currentDir}/src/components`);
+    console.log("📋 Copiando arquivos...");
 
-    // Move o componente para o destino
-    await Deno.rename(
-      `${tempDir}/components/${componentName}`,
-      targetPath
-    );
+    // Cria toda a estrutura de diretórios necessária
+    await ensureDir(`${currentDir}/src/components/${componentName}`);
+
+    // Verifica se o componente existe no diretório temporário
+    const sourceDir = `${tempDir}/components/${componentName}`;
+    try {
+      await Deno.stat(sourceDir);
+    } catch {
+      throw new Error(`Componente '${componentName}' não encontrado no repositório`);
+    }
+
+    // Copia os arquivos
+    const copyProcess = new Deno.Command("cp", {
+      args: [
+        "-r",
+        sourceDir,
+        `${currentDir}/src/components/`
+      ],
+    });
+
+    const copyOutput = await copyProcess.output();
+    if (!copyOutput.success) {
+      throw new Error("Falha ao copiar arquivos");
+    }
 
     // Limpa diretório temporário
     await Deno.remove(tempDir, { recursive: true });
@@ -48,6 +76,12 @@ async function downloadAndCopyComponent(componentName: string) {
     console.log(`✅ Componente '${componentName}' instalado com sucesso em ${targetPath}`);
   } catch (error) {
     console.error(`❌ Erro:`, error.message);
+    // Limpa diretório temporário em caso de erro
+    try {
+      await Deno.remove(tempDir, { recursive: true });
+    } catch {
+      // Ignora erro ao limpar
+    }
   }
 }
 
@@ -61,4 +95,4 @@ if (import.meta.main) {
   }
 
   await downloadAndCopyComponent(componentName);
-} 
+}
