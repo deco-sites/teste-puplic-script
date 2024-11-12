@@ -23,15 +23,20 @@ async function installComponent(componentPrefix: string) {
       stdout: "piped",
       stderr: "piped",
     });
+
     const cloneOutput = await cloneProcess.output();
     const cloneError = await cloneProcess.stderrOutput();
     const cloneStatus = await cloneProcess.status();
     cloneProcess.close();
     
-    console.log(new TextDecoder().decode(cloneOutput));
-    console.error(new TextDecoder().decode(cloneError));
+    // Mostrar as saídas de erro se houver
+    if (!cloneStatus.success) {
+      console.error("Erro ao clonar repositório:");
+      console.error(new TextDecoder().decode(cloneError));
+      throw new Error("Falha ao clonar repositório.");
+    }
 
-    if (!cloneStatus.success) throw new Error("Falha ao clonar repositório.");
+    console.log(new TextDecoder().decode(cloneOutput));
 
     console.log("🔍 Buscando componentes correspondentes...");
     const sparseSetProcess = Deno.run({
@@ -39,17 +44,20 @@ async function installComponent(componentPrefix: string) {
       stdout: "piped",
       stderr: "piped",
     });
+
     const sparseSetOutput = await sparseSetProcess.output();
     const sparseSetError = await sparseSetProcess.stderrOutput();
     const sparseSetStatus = await sparseSetProcess.status();
     sparseSetProcess.close();
 
-    console.log(new TextDecoder().decode(sparseSetOutput));
-    console.error(new TextDecoder().decode(sparseSetError));
-
+    // Mostrar as saídas de erro se houver
     if (!sparseSetStatus.success) {
+      console.error("Erro ao configurar sparse-checkout:");
+      console.error(new TextDecoder().decode(sparseSetError));
       throw new Error(`Componente '${componentPrefix}' não encontrado ou falha ao configurar sparse-checkout.`);
     }
+
+    console.log(new TextDecoder().decode(sparseSetOutput));
 
     const sourceDir = join(tempDir, "components", componentPrefix);
     try {
@@ -95,3 +103,4 @@ if (import.meta.main) {
 
   await installComponent(componentPrefix);
 }
+    console.error("teste");
